@@ -1,0 +1,344 @@
+{
+  "_documentation": {
+    "title": "Database JSON Schemas — Full API Representation",
+    "description": "JSON examples for each entity in the schema, showing how SQL tables serialize to API responses. Includes flat forms, expanded/nested forms, and one complete complex transaction object.",
+    "tables": [
+      "USERS",
+      "TRANSACTIONS",
+      "TRANSACTION_CATEGORIES",
+      "TRANSACTION_PARTICIPANTS",
+      "SYSTEM_LOGS"
+    ],
+    "conventions": {
+      "primary_keys": "Kept as integers in API responses. Use user_id / transaction_id etc. as field names matching SQL columns.",
+      "foreign_keys": "In flat (list) responses, FKs are returned as raw integers (e.g. sender_id: 1). In expanded (detail) responses, the FK field is replaced by a full nested object (e.g. sender: { ... }).",
+      "decimals": "DECIMAL SQL columns serialize as JSON numbers with 2 decimal places. A parallel *_cents integer field is also included to avoid floating-point drift in client calculations.",
+      "datetimes": "All DATETIME / TIMESTAMP columns serialize as ISO 8601 strings in UTC (e.g. '2024-03-10T19:30:00Z').",
+      "enums": "ENUM-style columns (status, user_type, role) serialize as lowercase strings.",
+      "sensitive_fields": "account_number is masked (last four digits only) in API responses. raw_sms_body and raw_transaction_ref are omitted from standard responses and only available to internal/admin endpoints.",
+      "computed_fields": "Fields marked 'computed' have no direct SQL column — they are derived via aggregation (COUNT, SUM) at query time.",
+      "hateoas_links": "Every entity object includes a _links block with hypermedia navigation URLs, following REST best practices."
+    }
+  },
+
+  "sql_to_json_mapping": {
+    "_note": "Column-by-column mapping for every table. Shows SQL type → JSON type, any transformation applied, and whether the field appears in list vs detail responses.",
+
+    "USERS": [
+      { "sql_column": "user_id",        "sql_type": "INT",      "json_field": "user_id",        "json_type": "number",  "notes": "Primary key. Always included." },
+      { "sql_column": "full_name",      "sql_type": "VARCHAR",  "json_field": "full_name",      "json_type": "string",  "notes": "Direct mapping." },
+      { "sql_column": "phone_number",   "sql_type": "VARCHAR",  "json_field": "phone_number",   "json_type": "string",  "notes": "Stored with country code e.g. +2507XXXXXXXX." },
+      { "sql_column": "account_number", "sql_type": "VARCHAR",  "json_field": "account_number_masked", "json_type": "string", "notes": "MASKED — only last 4 digits returned. Full value never serialized." },
+      { "sql_column": "user_type",      "sql_type": "VARCHAR",  "json_field": "user_type",      "json_type": "string",  "notes": "Enum: 'individual' | 'business' | 'agent'." },
+      { "sql_column": "created_at",     "sql_type": "DATETIME", "json_field": "created_at",     "json_type": "string",  "notes": "ISO 8601 UTC string." },
+      { "sql_column": "—",             "sql_type": "computed", "json_field": "total_sent",     "json_type": "number",  "notes": "SUM(amount) WHERE sender_id = user_id. Detail endpoint only." },
+      { "sql_column": "—",             "sql_type": "computed", "json_field": "total_received", "json_type": "number",  "notes": "SUM(amount) WHERE receiver_id = user_id. Detail endpoint only." }
+    ],
+
+    "TRANSACTIONS": [
+      { "sql_column": "transaction_id",      "sql_type": "INT",      "json_field": "transaction_id",      "json_type": "number",  "notes": "Primary key." },
+      { "sql_column": "sender_id",           "sql_type": "INT FK",   "json_field": "sender_id / sender",  "json_type": "number / object", "notes": "Flat: integer. Expanded: full User object." },
+      { "sql_column": "receiver_id",         "sql_type": "INT FK",   "json_field": "receiver_id / receiver", "json_type": "number / object", "notes": "Same FK expansion pattern as sender." },
+      { "sql_column": "category_id",         "sql_type": "INT FK",   "json_field": "category_id / category", "json_type": "number / object", "notes": "FK → TRANSACTION_CATEGORIES." },
+      { "sql_column": "amount",              "sql_type": "DECIMAL",  "json_field": "amount",              "json_type": "number",  "notes": "2 decimal places. Always positive — direction is inferred from sender/receiver." },
+      { "sql_column": "—",                  "sql_type": "computed", "json_field": "amount_cents",        "json_type": "number",  "notes": "amount × 100 as integer. Avoids float drift in client." },
+      { "sql_column": "fee",                 "sql_type": "DECIMAL",  "json_field": "fee",                 "json_type": "number",  "notes": "Transaction fee charged." },
+      { "sql_column": "balance_after",       "sql_type": "DECIMAL",  "json_field": "balance_after",       "json_type": "number",  "notes": "Sender's balance immediately after this transaction." },
+      { "sql_column": "transaction_date",    "sql_type": "DATETIME", "json_field": "transaction_date",    "json_type": "string",  "notes": "ISO 8601 UTC." },
+      { "sql_column": "status",             "sql_type": "VARCHAR",  "json_field": "status",             "json_type": "string",  "notes": "Enum: 'pending' | 'completed' | 'failed' | 'reversed'." },
+      { "sql_column": "raw_transaction_ref", "sql_type": "VARCHAR",  "json_field": "—",                  "json_type": "omitted", "notes": "OMITTED from standard responses. Internal/admin only." },
+      { "sql_column": "—",                  "sql_type": "JOIN",     "json_field": "participants",        "json_type": "array",   "notes": "Array from TRANSACTION_PARTICIPANTS. Detail endpoint only." }
+    ],
+
+    "TRANSACTION_CATEGORIES": [
+      { "sql_column": "category_id",   "sql_type": "INT",     "json_field": "category_id",   "json_type": "number", "notes": "Primary key." },
+      { "sql_column": "category_name", "sql_type": "VARCHAR", "json_field": "category_name", "json_type": "string", "notes": "Human-readable label." },
+      { "sql_column": "description",   "sql_type": "VARCHAR", "json_field": "description",   "json_type": "string", "notes": "Optional longer description." },
+      { "sql_column": "—",            "sql_type": "computed","json_field": "transaction_count", "json_type": "number", "notes": "COUNT(*) of transactions in this category." }
+    ],
+
+    "TRANSACTION_PARTICIPANTS": [
+      { "sql_column": "participant_id",  "sql_type": "INT",     "json_field": "participant_id",  "json_type": "number", "notes": "Primary key." },
+      { "sql_column": "transaction_id",  "sql_type": "INT FK",  "json_field": "transaction_id",  "json_type": "number", "notes": "FK → TRANSACTIONS. Not repeated when nested inside a transaction object." },
+      { "sql_column": "user_id",         "sql_type": "INT FK",  "json_field": "user_id / user",  "json_type": "number / object", "notes": "FK → USERS. Expanded to user object in detail responses." },
+      { "sql_column": "role",            "sql_type": "VARCHAR", "json_field": "role",            "json_type": "string", "notes": "Enum: 'initiator' | 'beneficiary' | 'guarantor' | 'agent'." }
+    ],
+
+    "SYSTEM_LOGS": [
+      { "sql_column": "log_id",            "sql_type": "INT",      "json_field": "log_id",            "json_type": "number", "notes": "Primary key." },
+      { "sql_column": "transaction_id",    "sql_type": "INT FK",   "json_field": "transaction_id",    "json_type": "number", "notes": "FK → TRANSACTIONS." },
+      { "sql_column": "sms_date",          "sql_type": "DATETIME", "json_field": "sms_date",          "json_type": "string", "notes": "When the SMS was received/sent." },
+      { "sql_column": "processed_at",      "sql_type": "DATETIME", "json_field": "processed_at",      "json_type": "string", "notes": "When the system processed this log entry." },
+      { "sql_column": "processing_status", "sql_type": "VARCHAR",  "json_field": "processing_status", "json_type": "string", "notes": "Enum: 'pending' | 'processed' | 'failed' | 'duplicate'." },
+      { "sql_column": "raw_sms_body",      "sql_type": "VARCHAR",  "json_field": "—",                 "json_type": "omitted", "notes": "OMITTED from standard API. Sensitive raw SMS text." }
+    ]
+  },
+
+  "entity_examples": {
+
+    "user": {
+      "_description": "A single user record. account_number is masked. Returned by GET /api/v1/users/:id",
+      "_sql_source": "SELECT u.*, COUNT(t_sent.transaction_id) AS transactions_sent FROM USERS u LEFT JOIN TRANSACTIONS t_sent ON t_sent.sender_id = u.user_id WHERE u.user_id = 1",
+      "user_id": 1,
+      "full_name": "Amara Nkosi",
+      "phone_number": "+250781234567",
+      "account_number_masked": "****8921",
+      "user_type": "individual",
+      "created_at": "2023-06-15T08:30:00Z",
+      "stats": {
+        "_note": "Computed fields — aggregated at query time, not stored columns",
+        "total_sent": 1250000.00,
+        "total_sent_cents": 125000000,
+        "total_received": 980000.00,
+        "total_received_cents": 98000000,
+        "transactions_sent": 47,
+        "transactions_received": 38
+      },
+      "_links": {
+        "self": "/api/v1/users/1",
+        "transactions_sent": "/api/v1/transactions?sender_id=1",
+        "transactions_received": "/api/v1/transactions?receiver_id=1",
+        "participants": "/api/v1/users/1/participants"
+      }
+    },
+
+    "transaction_category": {
+      "_description": "A transaction category record. Returned by GET /api/v1/categories/:id",
+      "_sql_source": "SELECT c.*, COUNT(t.transaction_id) AS transaction_count FROM TRANSACTION_CATEGORIES c LEFT JOIN TRANSACTIONS t ON t.category_id = c.category_id WHERE c.category_id = 3",
+      "category_id": 3,
+      "category_name": "Mobile Money Transfer",
+      "description": "Person-to-person transfers via mobile money platforms such as MTN MoMo and Airtel Money.",
+      "transaction_count": 1847,
+      "_links": {
+        "self": "/api/v1/categories/3",
+        "transactions": "/api/v1/transactions?category_id=3"
+      }
+    },
+
+    "transaction_flat": {
+      "_description": "Flat (compact) transaction — used in list responses. FK fields remain as integer IDs. Returned by GET /api/v1/transactions",
+      "_sql_source": "SELECT * FROM TRANSACTIONS ORDER BY transaction_date DESC LIMIT 20",
+      "transaction_id": 1001,
+      "sender_id": 1,
+      "receiver_id": 7,
+      "category_id": 3,
+      "amount": 50000.00,
+      "amount_cents": 5000000,
+      "fee": 250.00,
+      "fee_cents": 25000,
+      "balance_after": 200750.00,
+      "transaction_date": "2024-03-10T19:30:00Z",
+      "status": "completed",
+      "_links": {
+        "self": "/api/v1/transactions/1001",
+        "sender": "/api/v1/users/1",
+        "receiver": "/api/v1/users/7",
+        "category": "/api/v1/categories/3",
+        "logs": "/api/v1/transactions/1001/logs"
+      }
+    },
+
+    "transaction_participant": {
+      "_description": "A single participant record for a transaction. Returned by GET /api/v1/transactions/:id/participants",
+      "_sql_source": "SELECT p.*, u.full_name, u.phone_number FROM TRANSACTION_PARTICIPANTS p JOIN USERS u ON u.user_id = p.user_id WHERE p.transaction_id = 1001",
+      "participant_id": 55,
+      "transaction_id": 1001,
+      "role": "initiator",
+      "user": {
+        "_note": "FK user_id expanded to a minimal user object in this context",
+        "user_id": 1,
+        "full_name": "Amara Nkosi",
+        "phone_number": "+250781234567",
+        "user_type": "individual"
+      },
+      "_links": {
+        "self": "/api/v1/participants/55",
+        "transaction": "/api/v1/transactions/1001",
+        "user": "/api/v1/users/1"
+      }
+    },
+
+    "system_log": {
+      "_description": "A system log entry linked to a transaction. raw_sms_body is omitted. Returned by GET /api/v1/transactions/:id/logs",
+      "_sql_source": "SELECT log_id, transaction_id, sms_date, processed_at, processing_status FROM SYSTEM_LOGS WHERE transaction_id = 1001",
+      "log_id": 8801,
+      "transaction_id": 1001,
+      "sms_date": "2024-03-10T19:29:45Z",
+      "processed_at": "2024-03-10T19:29:52Z",
+      "processing_status": "processed",
+      "raw_sms_body": "[OMITTED — available to admin endpoints only]",
+      "_links": {
+        "self": "/api/v1/logs/8801",
+        "transaction": "/api/v1/transactions/1001"
+      }
+    }
+  },
+
+  "complex_transaction_object": {
+    "_description": "The complete expanded transaction object — all related data nested inline. Returned by GET /api/v1/transactions/1001?expand=sender,receiver,category,participants,logs. This is what you would cache client-side or display on a transaction detail screen.",
+    "_sql_equivalent": "SELECT t.*, u_s.full_name AS sender_name, u_s.phone_number AS sender_phone, u_r.full_name AS receiver_name, u_r.phone_number AS receiver_phone, c.category_name, c.description AS category_desc FROM TRANSACTIONS t JOIN USERS u_s ON u_s.user_id = t.sender_id JOIN USERS u_r ON u_r.user_id = t.receiver_id JOIN TRANSACTION_CATEGORIES c ON c.category_id = t.category_id WHERE t.transaction_id = 1001 -- Then separate queries for participants and logs",
+
+    "transaction_id": 1001,
+    "status": "completed",
+    "transaction_date": "2024-03-10T19:30:00Z",
+
+    "amount": 50000.00,
+    "amount_cents": 5000000,
+    "fee": 250.00,
+    "fee_cents": 25000,
+    "total_deducted": 50250.00,
+    "total_deducted_cents": 5025000,
+    "balance_after": 200750.00,
+    "balance_after_cents": 20075000,
+
+    "sender": {
+      "_note": "FK sender_id → USERS. Full user object embedded. account_number masked.",
+      "user_id": 1,
+      "full_name": "Amara Nkosi",
+      "phone_number": "+250781234567",
+      "account_number_masked": "****8921",
+      "user_type": "individual",
+      "created_at": "2023-06-15T08:30:00Z"
+    },
+
+    "receiver": {
+      "_note": "FK receiver_id → USERS. Separate user object — same table, different role.",
+      "user_id": 7,
+      "full_name": "Bella Uwimana",
+      "phone_number": "+250788654321",
+      "account_number_masked": "****3047",
+      "user_type": "individual",
+      "created_at": "2023-09-01T11:00:00Z"
+    },
+
+    "category": {
+      "_note": "FK category_id → TRANSACTION_CATEGORIES. Full category object embedded.",
+      "category_id": 3,
+      "category_name": "Mobile Money Transfer",
+      "description": "Person-to-person transfers via mobile money platforms such as MTN MoMo and Airtel Money."
+    },
+
+    "participants": {
+      "_note": "1:N from TRANSACTION_PARTICIPANTS. The pivot table disappears — data collapses into an array. Each entry nests the related USERS record.",
+      "_sql_source": "SELECT p.participant_id, p.role, u.user_id, u.full_name, u.phone_number, u.user_type FROM TRANSACTION_PARTICIPANTS p JOIN USERS u ON u.user_id = p.user_id WHERE p.transaction_id = 1001",
+      "count": 3,
+      "items": [
+        {
+          "participant_id": 55,
+          "role": "initiator",
+          "user": {
+            "user_id": 1,
+            "full_name": "Amara Nkosi",
+            "phone_number": "+250781234567",
+            "user_type": "individual"
+          }
+        },
+        {
+          "participant_id": 56,
+          "role": "beneficiary",
+          "user": {
+            "user_id": 7,
+            "full_name": "Bella Uwimana",
+            "phone_number": "+250788654321",
+            "user_type": "individual"
+          }
+        },
+        {
+          "participant_id": 57,
+          "role": "agent",
+          "user": {
+            "user_id": 22,
+            "full_name": "Claude Habimana",
+            "phone_number": "+250722999888",
+            "user_type": "agent"
+          }
+        }
+      ]
+    },
+
+    "system_log": {
+      "_note": "1:1 or 1:N from SYSTEM_LOGS. raw_sms_body is OMITTED here — present in DB but never exposed in standard API responses.",
+      "_sql_source": "SELECT log_id, sms_date, processed_at, processing_status FROM SYSTEM_LOGS WHERE transaction_id = 1001",
+      "log_id": 8801,
+      "sms_date": "2024-03-10T19:29:45Z",
+      "processed_at": "2024-03-10T19:29:52Z",
+      "processing_latency_ms": 7000,
+      "processing_status": "processed",
+      "raw_sms_body": "[OMITTED]"
+    },
+
+    "_links": {
+      "self": "/api/v1/transactions/1001",
+      "sender": "/api/v1/users/1",
+      "receiver": "/api/v1/users/7",
+      "category": "/api/v1/categories/3",
+      "participants": "/api/v1/transactions/1001/participants",
+      "logs": "/api/v1/transactions/1001/logs"
+    }
+  },
+
+  "api_response_envelopes": {
+    "_description": "Real API responses always wrap entity objects in an envelope with metadata. These show what the full HTTP response body looks like.",
+
+    "list_response_example": {
+      "_endpoint": "GET /api/v1/transactions?sender_id=1&status=completed&page=1&limit=3",
+      "success": true,
+      "data": [
+        {
+          "transaction_id": 1001,
+          "sender_id": 1,
+          "receiver_id": 7,
+          "category_id": 3,
+          "amount": 50000.00,
+          "fee": 250.00,
+          "status": "completed",
+          "transaction_date": "2024-03-10T19:30:00Z"
+        },
+        {
+          "transaction_id": 998,
+          "sender_id": 1,
+          "receiver_id": 14,
+          "category_id": 5,
+          "amount": 12000.00,
+          "fee": 100.00,
+          "status": "completed",
+          "transaction_date": "2024-03-08T11:15:00Z"
+        },
+        {
+          "transaction_id": 972,
+          "sender_id": 1,
+          "receiver_id": 3,
+          "category_id": 3,
+          "amount": 75000.00,
+          "fee": 375.00,
+          "status": "completed",
+          "transaction_date": "2024-03-01T09:00:00Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 3,
+        "total_records": 47,
+        "total_pages": 16,
+        "has_next_page": true,
+        "has_prev_page": false,
+        "_links": {
+          "first": "/api/v1/transactions?sender_id=1&page=1&limit=3",
+          "next": "/api/v1/transactions?sender_id=1&page=2&limit=3",
+          "last": "/api/v1/transactions?sender_id=1&page=16&limit=3"
+        }
+      }
+    },
+
+    "error_response_example": {
+      "_endpoint": "GET /api/v1/transactions/9999",
+      "success": false,
+      "error": {
+        "code": "NOT_FOUND",
+        "http_status": 404,
+        "message": "Transaction with ID 9999 does not exist.",
+        "timestamp": "2024-03-10T20:00:00Z"
+      }
+    }
+  }
+}
