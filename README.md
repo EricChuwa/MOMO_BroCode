@@ -3,14 +3,17 @@
 By: BroCode 
 
 ## Project Description
-MoMo Data Analytics Dashboard
-A fullstack data pipeline and analytics application that processes MTN Mobile Money (MoMo) SMS transaction data exported in XML format. The system parses, cleans, categorizes, and stores transaction records in a relational database, then exposes the data through a frontend dashboard with charts and summaries for financial analysis.
-Core features:
+MoMo Transaction API
+A Python REST API that parses MTN Mobile Money (MoMo) SMS transaction data from an XML file
+and exposes it through a set of authenticated CRUD endpoints built with Python's standard
+`http.server` library. No external frameworks are used.
 
-- XML ETL pipeline (parse → clean → categorize → load)
-- SQLite database for structured transaction storage
-- JSON export layer for frontend consumption
-- Interactive dashboard with transaction analytics and visualizations
+Core features:
+- XML parsing that converts SMS records into JSON objects (list of dictionaries)
+- REST API with full CRUD support across 5 endpoints
+- Basic Authentication protecting all endpoints (401 returned for invalid credentials)
+- In-memory dictionary store for fast transaction lookup
+- DSA comparison: linear search vs. dictionary lookup benchmarked across 20+ records
 
 ## Scrum Board
 Link:: https://trello.com/invite/b/6a008b4a3593a69f4fd9612a/ATTIe362f9a87252009efe3efea66aefc9f153C01865/brocode
@@ -28,9 +31,39 @@ Link:: https://miro.com/welcomeonboard/RXQ2RUtJWkV6U3A4ek1LbFFEdEp5alJVV0Y1cHQzV
 - Raphael Mumo
 
 ---
-## Database Design (Week 2)
 
-This week the team moved from a flat XML-parsing script into a fully structured relational database. The goal was to design a schema that can store every MoMo transaction type found in the SMS data, enforce data integrity automatically, and serve clean data to the API and JSON layers being built in parallel.
+## API Endpoints
+
+All endpoints require Basic Authentication. See [`docs/api_docs.md`](docs/api_docs.md)
+for full request/response examples and error codes.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/transactions` | List all SMS transactions |
+| `GET` | `/transactions/{id}` | Retrieve a single transaction by ID |
+| `POST` | `/transactions` | Add a new transaction record |
+| `PUT` | `/transactions/{id}` | Update an existing transaction |
+| `DELETE` | `/transactions/{id}` | Delete a transaction |
+
+---
+
+## Data Structures & Algorithms
+
+The `dsa/` folder implements and benchmarks two search strategies against the parsed
+transaction dataset:
+
+- **Linear Search** — iterates through the full list of transactions to find a record by ID. O(n).
+- **Dictionary Lookup** — stores transactions in a `{id: transaction}` dictionary and retrieves
+  by key directly. O(1) average case.
+
+Both approaches are timed across a minimum of 20 records. Results and a written reflection
+on why dictionary lookup outperforms linear search — and suggestions for further improvement —
+are included in the PDF report.
+
+---
+## Database Design
+
+During week 2 the team moved from a flat XML-parsing script into a fully structured relational database. The goal was to design a schema that can store every MoMo transaction type found in the SMS data, enforce data integrity automatically, and serve clean data to the API and JSON layers being built in parallel.
 
 ---
 
@@ -114,16 +147,86 @@ mysql -u root -p momo_brocode -e "SHOW TABLES;"
 
 ---
 
-### File structure (Week 2 additions)
+### Current File structure
 
 ```
 MOMO_BroCode/
+├── api/                        ← REST API server (http.server)
+├── dsa/                        ← XML parsing + linear search vs dict lookup
 ├── database/
 │   └── database_setup.sql      ← Full DDL + DML + triggers + views
 ├── docs/
-│   └── erd_diagram.png         ← Entity Relationship Diagram
+│   ├── erd_diagram.png         ← Entity Relationship Diagram
+│   └── api_docs.md             ← Required endpoint documentation
+├── screenshots/            ← curl/Postman test evidence
 ├── examples/
 │   └── json_schemas.json       ← JSON schema examples for each entity
 └── README.md
 ```
 
+---
+
+## Setup & Running Instructions
+
+### Prerequisites
+- Python **3.8 or higher** (no external libraries required — uses standard library only)
+- The `modified_sms_v2.xml` file placed in the project root
+
+Check your Python version:
+```bash
+python --version
+```
+
+---
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/EricChuwa/MOMO_BroCode.git
+cd MOMO_BroCode
+```
+
+---
+
+### 2. Parse the XML Data
+Run the parser to read `modified_sms_v2.xml` and convert SMS records into JSON:
+```bash
+python dsa/parse_xml.py
+```
+This will output the parsed transactions and run the DSA comparison (linear search vs. dictionary lookup) with performance measurements.
+
+---
+
+### 3. Start the API Server
+```bash
+python api/server.py
+```
+The server starts on **`http://localhost:8000`** by default.
+
+You should see:
+```
+Server running on http://localhost:8000
+Press Ctrl+C to stop.
+```
+
+---
+
+### 4. Test the API
+
+All endpoints require **Basic Authentication**.
+
+| Field | Value |
+|---|---|
+| Username | `admin` |
+| Password | `brocode123` |
+
+**Example request using curl:**
+```bash
+curl -u admin:brocode123 http://localhost:8000/transactions
+```
+
+**Example request using Postman:**
+- Set Authorization type to **Basic Auth**
+- Enter the username and password above
+- Send a `GET` request to `http://localhost:8000/transactions`
+
+> NOTE! These are test credentials for development only. See `docs/api_docs.md` for full endpoint documentation and `screenshots/` for test case evidence.
