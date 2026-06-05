@@ -30,6 +30,7 @@ Link:: https://miro.com/welcomeonboard/RXQ2RUtJWkV6U3A4ek1LbFFEdEp5alJVV0Y1cHQzV
 - Albert Afiti
 - Raphael Mumo
 
+Team Participation Sheet: https://docs.google.com/spreadsheets/d/1jrQdmmHLT28j0wUPdn4v9YOeUGLjl3PRuNQfz-Q0YsQ/edit?usp=sharing
 ---
 
 ## API Endpoints
