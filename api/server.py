@@ -4,45 +4,35 @@ import base64
 import sys
 import os
 
-# Import our XML parser from the same folder
 sys.path.append(os.path.dirname(__file__))
 from parser import parse_sms_xml
 
-# Load all transactions from the XML file into memory when the server starts
-XML_PATH = os.path.join(
-    os.path.dirname(__file__), "../data/raw/modified_sms_v2.xml"
-)
+XML_PATH = os.path.join(os.path.dirname(__file__), "../data/raw/modified_sms_v2.xml")
 transactions = parse_sms_xml(XML_PATH)
 
-# Store transactions in a dictionary so we can find any record instantly by its ID
 transactions_dict = {t["id"]: t for t in transactions}
-
-# Track what the next new ID should be when someone adds a record
 next_id = max(transactions_dict.keys()) + 1
 
-# These are the only valid login credentials for our API
 VALID_USERNAME = "admin"
 VALID_PASSWORD = "password123"
 
 
 def check_auth(handler):
-    # This function checks if the request includes the correct username and password
-    # It reads the Authorization header, decodes it, and compares to our credentials
     auth_header = handler.headers.get("Authorization", "")
 
     if not auth_header.startswith("Basic "):
         return False
 
-    encoded = auth_header[len("Basic ") :]
-    decoded = base64.b64decode(encoded).decode("utf-8")
-    username, password = decoded.split(":", 1)
-
-    return username == VALID_USERNAME and password == VALID_PASSWORD
+    try:
+        encoded = auth_header[len("Basic "):]
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        username, password = decoded.split(":", 1)
+        return username == VALID_USERNAME and password == VALID_PASSWORD
+    except Exception:
+        return False
 
 
 def send_json(handler, status_code, data):
-    # This function sends a JSON response back to the client
-    # Every endpoint uses this to return data
     body = json.dumps(data, indent=2).encode("utf-8")
     handler.send_response(status_code)
     handler.send_header("Content-Type", "application/json")
@@ -51,32 +41,33 @@ def send_json(handler, status_code, data):
     handler.wfile.write(body)
 
 
+def send_unauthorized(handler):
+    body = json.dumps({"error": "Unauthorized. Please provide valid credentials."}).encode("utf-8")
+    handler.send_response(401)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("WWW-Authenticate", 'Basic realm="MoMo API"')
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 class MoMoHandler(BaseHTTPRequestHandler):
-    # This class handles every incoming request to our server
-    # Each method below handles a different HTTP verb: GET, POST, PUT, DELETE
 
     def do_GET(self):
-        # Reject the request immediately if credentials are wrong
         if not check_auth(self):
-            send_json(
-                self, 401, {"error": "Unauthorized. Please provide valid credentials."}
-            )
+            send_unauthorized(self)
             return
 
         if self.path == "/transactions":
-            # Return all transactions as a list
             send_json(self, 200, list(transactions_dict.values()))
 
         elif self.path.startswith("/transactions/"):
-            # Return one transaction matching the ID in the URL
             try:
                 record_id = int(self.path.split("/")[-1])
                 if record_id in transactions_dict:
                     send_json(self, 200, transactions_dict[record_id])
                 else:
-                    send_json(
-                        self, 404, {"error": f"Transaction {record_id} not found."}
-                    )
+                    send_json(self, 404, {"error": f"Transaction {record_id} not found."})
             except ValueError:
                 send_json(self, 400, {"error": "ID must be a number."})
 
@@ -84,17 +75,13 @@ class MoMoHandler(BaseHTTPRequestHandler):
             send_json(self, 404, {"error": "Endpoint not found."})
 
     def do_POST(self):
-        # Reject if credentials are wrong
         if not check_auth(self):
-            send_json(
-                self, 401, {"error": "Unauthorized. Please provide valid credentials."}
-            )
+            send_unauthorized(self)
             return
 
         if self.path == "/transactions":
             global next_id
 
-            # Read the request body and parse it as JSON
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
 
@@ -104,7 +91,12 @@ class MoMoHandler(BaseHTTPRequestHandler):
                 send_json(self, 400, {"error": "Invalid JSON body."})
                 return
 
-            # Assign a unique ID and save the new record
+            required_fields = ["amount", "transaction_type", "sender", "receiver"]
+            missing = [f for f in required_fields if f not in new_record]
+            if missing:
+                send_json(self, 400, {"error": f"Missing required fields: {missing}"})
+                return
+
             new_record["id"] = next_id
             transactions_dict[next_id] = new_record
             next_id += 1
@@ -114,11 +106,8 @@ class MoMoHandler(BaseHTTPRequestHandler):
             send_json(self, 404, {"error": "Endpoint not found."})
 
     def do_PUT(self):
-        # Reject if credentials are wrong
         if not check_auth(self):
-            send_json(
-                self, 401, {"error": "Unauthorized. Please provide valid credentials."}
-            )
+            send_unauthorized(self)
             return
 
         if self.path.startswith("/transactions/"):
@@ -132,7 +121,6 @@ class MoMoHandler(BaseHTTPRequestHandler):
                 send_json(self, 404, {"error": f"Transaction {record_id} not found."})
                 return
 
-            # Read and parse the update data from the request body
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
 
@@ -142,7 +130,6 @@ class MoMoHandler(BaseHTTPRequestHandler):
                 send_json(self, 400, {"error": "Invalid JSON body."})
                 return
 
-            # Apply the updates to the existing record
             transactions_dict[record_id].update(updated_fields)
             transactions_dict[record_id]["id"] = record_id
 
@@ -151,11 +138,8 @@ class MoMoHandler(BaseHTTPRequestHandler):
             send_json(self, 404, {"error": "Endpoint not found."})
 
     def do_DELETE(self):
-        # Reject if credentials are wrong
         if not check_auth(self):
-            send_json(
-                self, 401, {"error": "Unauthorized. Please provide valid credentials."}
-            )
+            send_unauthorized(self)
             return
 
         if self.path.startswith("/transactions/"):
@@ -169,22 +153,18 @@ class MoMoHandler(BaseHTTPRequestHandler):
                 send_json(self, 404, {"error": f"Transaction {record_id} not found."})
                 return
 
-            # Remove the record and return it as confirmation
             deleted = transactions_dict.pop(record_id)
-            send_json(
-                self,
-                200,
-                {"message": f"Transaction {record_id} deleted.", "deleted": deleted},
-            )
+            send_json(self, 200, {"message": f"Transaction {record_id} deleted.", "deleted": deleted})
         else:
             send_json(self, 404, {"error": "Endpoint not found."})
 
     def log_message(self, format, *args):
-        # Print a clean log line each time a request comes in
         print(f"  [{self.address_string()}] {format % args}")
 
+    def log_error(self, format, *args):
+        pass
 
-# Start the server on port 8000 and keep it running until Ctrl+C
+
 if __name__ == "__main__":
     PORT = 8000
     server = HTTPServer(("localhost", PORT), MoMoHandler)
